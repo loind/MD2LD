@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "lark-push",
+      "name": "md2ld",
       "dependencies": {
         "marked": "^12.0.0",
         "minimist": "^1.2.8",

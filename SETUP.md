@@ -1,4 +1,4 @@
-# lark-push — Setup Guide
+# md2ld — Setup Guide
 
 ## Quick Install (any machine)
 
@@ -13,10 +13,10 @@ curl -fsSL https://bun.sh/install | bash
 # 3. Build binary
 bun install
 bun run build
-# -> dist/lark-push
+# -> dist/md2ld
 
 # 4. Copy to PATH
-sudo cp dist/lark-push /usr/local/bin/
+sudo cp dist/md2ld /usr/local/bin/
 ```
 
 ## Lark App Setup (one-time)
@@ -33,21 +33,21 @@ sudo cp dist/lark-push /usr/local/bin/
 
 ```bash
 # Pass credentials as flags
-lark-push README.md --app-id cli_xxx --app-secret xxx --folder fldXXX
+md2ld README.md --app-id cli_xxx --app-secret xxx --folder fldXXX
 
 # Or set env vars (add to ~/.bashrc or ~/.zshrc)
 export LARK_APP_ID=cli_xxx
 export LARK_APP_SECRET=xxx
 export LARK_FOLDER=fldXXX
-lark-push README.md
+md2ld README.md
 
 # Or use config file
-cat > ~/.lark-push.env << 'EOF'
+cat > ~/.md2ld.env << 'EOF'
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
 LARK_FOLDER=fldXXX
 EOF
-lark-push README.md
+md2ld README.md
 ```
 
 ## Claude Code Integration
@@ -56,23 +56,23 @@ Copy the slash command to any repo where you want to use it:
 
 ```bash
 mkdir -p .claude/commands
-cp MD2LD/.claude/commands/lark-push.md .claude/commands/
+cp MD2LD/.claude/commands/md2ld.md .claude/commands/
 ```
 
 Then in Claude Code:
 ```
-/lark-push docs/design.md
+/md2ld docs/design.md
 ```
 
 ## Cross-platform Build
 
 ```bash
 # macOS ARM (M1/M2/M3/M4)
-bun build src/index.ts --compile --target bun-darwin-arm64 --outfile dist/lark-push-macos-arm64
+bun build src/index.ts --compile --target bun-darwin-arm64 --outfile dist/md2ld-macos-arm64
 
 # macOS Intel
-bun build src/index.ts --compile --target bun-darwin-x64 --outfile dist/lark-push-macos-x64
+bun build src/index.ts --compile --target bun-darwin-x64 --outfile dist/md2ld-macos-x64
 
 # Linux x64
-bun build src/index.ts --compile --target bun-linux-x64 --outfile dist/lark-push-linux-x64
+bun build src/index.ts --compile --target bun-linux-x64 --outfile dist/md2ld-linux-x64
 ```

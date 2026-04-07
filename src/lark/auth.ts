@@ -33,7 +33,7 @@ export async function getToken(): Promise<string> {
 
     if (!appId || !appSecret) {
         throw new Error(
-            "Missing LARK_APP_ID or LARK_APP_SECRET. Pass --app-id/--app-secret or set env vars."
+            "Missing LARK_APP_ID or LARK_APP_SECRET. Pass --app-id/--app-secret or set env vars. See: md2ld --help"
         );
     }
 

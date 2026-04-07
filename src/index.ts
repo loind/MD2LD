@@ -13,7 +13,7 @@ import { BlockType } from "./converter/types";
 // Load .env file from home directory if exists
 function loadEnv(): void {
     const envPaths = [
-        join(process.env.HOME || "~", ".lark-push.env"),
+        join(process.env.HOME || "~", ".md2ld.env"),
         join(process.cwd(), ".env"),
     ];
 
@@ -36,10 +36,10 @@ function loadEnv(): void {
 }
 
 function printUsage(): void {
-    console.log(`lark-push - Push Markdown files to Lark Docs
+    console.log(`md2ld - Push Markdown files to Lark Docs
 
 Usage:
-  lark-push <file.md> [options]
+  md2ld <file.md> [options]
 
 Options:
   --app-id <id>        Lark app ID (or env LARK_APP_ID)
@@ -57,7 +57,7 @@ Environment (fallback when flags not provided):
   LARK_FOLDER          Default folder token
 
 Config files (loaded automatically):
-  ~/.lark-push.env
+  ~/.md2ld.env
   ./.env
 `);
 }

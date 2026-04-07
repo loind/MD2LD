@@ -1,16 +1,16 @@
 {
-  "name": "lark-push",
+  "name": "md2ld",
   "version": "1.0.0",
   "description": "Push Markdown files to Lark Docs as a single binary",
   "type": "module",
   "main": "src/index.ts",
   "bin": {
-    "lark-push": "src/index.ts"
+    "md2ld": "src/index.ts"
   },
   "scripts": {
     "dev": "bun run src/index.ts",
     "test": "bun test",
-    "build": "bun build src/index.ts --compile --outfile dist/lark-push"
+    "build": "bun build src/index.ts --compile --outfile dist/md2ld"
   },
   "dependencies": {
     "marked": "^12.0.0",
