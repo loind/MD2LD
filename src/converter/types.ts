@@ -29,6 +29,7 @@ export interface TextStyle {
 }
 
 export interface LarkBlock {
+    block_id?: string;
     block_type: number;
     text?: {
         style?: TextStyle;
@@ -55,8 +56,18 @@ export interface LarkBlock {
             header_row?: boolean;
         };
     };
+    table_cell?: Record<string, never>;
     divider?: Record<string, never>;
     children?: string[];
+}
+
+/**
+ * A table group: the table block + all descendant blocks (cells + cell content).
+ * Used by the descendant API to create a table with content in one call.
+ */
+export interface TableGroup {
+    tableBlockId: string;
+    descendants: LarkBlock[];
 }
 
 /** Block type constants matching Lark API */

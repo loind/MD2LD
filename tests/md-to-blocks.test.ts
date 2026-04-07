@@ -172,8 +172,12 @@ describe("mdToBlocks", () => {
         test("table block exists", () => {
             const tables = result.blocks.filter((b) => b.block_type === BlockType.TABLE);
             expect(tables).toHaveLength(1);
-            expect(tables[0].table?.property.row_size).toBe(3);
-            expect(tables[0].table?.property.column_size).toBe(3);
+            // Table data is now in __tableGroup for the descendant API
+            const tg = (tables[0] as any).__tableGroup;
+            expect(tg).toBeDefined();
+            const tableDesc = tg.descendants.find((d: any) => d.block_type === BlockType.TABLE);
+            expect(tableDesc.table?.property.row_size).toBe(3);
+            expect(tableDesc.table?.property.column_size).toBe(3);
         });
 
         test("divider block", () => {

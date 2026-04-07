@@ -4,6 +4,7 @@ import {
     type TextElement,
     type TextElementStyle,
     type ConvertResult,
+    type TableGroup,
     BlockType,
     LANG_MAP,
 } from "./types";
@@ -14,6 +15,7 @@ import {
  * Auto-extracts the first H1 as the document title.
  */
 export function mdToBlocks(markdown: string): ConvertResult {
+    resetTableIdCounter();
     const tokens = marked.lexer(markdown);
     let title = "Untitled";
     let titleExtracted = false;
@@ -55,7 +57,7 @@ function tokenToBlocks(token: Token): LarkBlock[] {
             return [];
         case "html":
             // Treat raw HTML as a paragraph with the text content
-            return [makeTextBlock(BlockType.TEXT, [{ text_run: { content: (token as Tokens.HTML).text } }])];
+            return [makeTextBlock(BlockType.TEXT, [{ text_run: { content: decodeHtmlEntities((token as Tokens.HTML).text) } }])];
         default:
             return [];
     }
@@ -172,7 +174,7 @@ function codeBlock(token: Tokens.Code): LarkBlock {
         block_type: BlockType.CODE,
         code: {
             style: { language: languageCode },
-            elements: [{ text_run: { content: token.text } }],
+            elements: [{ text_run: { content: decodeHtmlEntities(token.text) } }],
         },
     } as LarkBlock;
 }
@@ -192,35 +194,73 @@ function imageBlock(token: Tokens.Image): LarkBlock {
     };
 }
 
+/** Counter for generating unique block IDs across all tables in a document */
+let tableIdCounter = 0;
+
+/** Reset counter between documents */
+export function resetTableIdCounter(): void {
+    tableIdCounter = 0;
+}
+
+/**
+ * Build a TableGroup for the descendant API.
+ * Returns a marker block (TABLE type) in the flat blocks array,
+ * and stores the full descendant tree in the marker's __tableGroup property.
+ */
 function tableBlocks(token: Tokens.Table): LarkBlock[] {
     const rows = token.header.length > 0 ? 1 + token.rows.length : token.rows.length;
     const cols = token.header.length;
+    const tableNum = tableIdCounter++;
 
-    // Build cell blocks
+    const tableBlockId = `tbl_${tableNum}`;
     const cellBlockIds: string[] = [];
-    let cellIndex = 0;
+    const descendants: LarkBlock[] = [];
+
+    // Helper to build one cell + its text child
+    const buildCell = (elements: TextElement[], cellIdx: number): void => {
+        const cellId = `${tableBlockId}_c${cellIdx}`;
+        const textId = `${tableBlockId}_c${cellIdx}_t`;
+        cellBlockIds.push(cellId);
+
+        // Text block inside cell
+        const textBlock: LarkBlock = {
+            block_id: textId,
+            block_type: BlockType.TEXT,
+            text: {
+                elements: elements.length > 0 ? elements : [{ text_run: { content: "" } }],
+            },
+            children: [],
+        };
+
+        // Cell block referencing text child
+        const cellBlock: LarkBlock = {
+            block_id: cellId,
+            block_type: BlockType.TABLE_CELL,
+            table_cell: {},
+            children: [textId],
+        };
+
+        descendants.push(cellBlock, textBlock);
+    };
 
     // Header row
+    let cellIdx = 0;
     if (token.header.length > 0) {
         for (const cell of token.header) {
-            const elements = inlineTokensToElements(cell.tokens);
-            const cellId = `cell_${cellIndex++}`;
-            cellBlockIds.push(cellId);
-            // Note: in actual API, cells are child blocks referenced by ID.
-            // For our output, we'll embed cell content inline.
+            buildCell(inlineTokensToElements(cell.tokens), cellIdx++);
         }
     }
 
     // Data rows
     for (const row of token.rows) {
         for (const cell of row) {
-            const cellId = `cell_${cellIndex++}`;
-            cellBlockIds.push(cellId);
+            buildCell(inlineTokensToElements(cell.tokens), cellIdx++);
         }
     }
 
-    // Build table block
+    // Table container block
     const tableBlock: LarkBlock = {
+        block_id: tableBlockId,
         block_type: BlockType.TABLE,
         table: {
             cells: cellBlockIds,
@@ -230,37 +270,23 @@ function tableBlocks(token: Tokens.Table): LarkBlock[] {
                 header_row: token.header.length > 0,
             },
         },
+        children: cellBlockIds,
     };
 
-    // Build cell content blocks
-    const cellBlocks: LarkBlock[] = [];
-    cellIndex = 0;
+    // Full descendant tree: table first, then all cells+text
+    const allDescendants: LarkBlock[] = [tableBlock, ...descendants];
 
-    if (token.header.length > 0) {
-        for (const cell of token.header) {
-            const elements = inlineTokensToElements(cell.tokens);
-            cellBlocks.push({
-                block_type: BlockType.TABLE_CELL,
-                text: {
-                    elements: elements.length > 0 ? elements : [{ text_run: { content: "" } }],
-                },
-            });
-        }
-    }
+    // Return a marker block that carries the TableGroup data.
+    // The insertBlocks function will detect this and use the descendant API.
+    const marker: LarkBlock & { __tableGroup?: TableGroup } = {
+        block_type: BlockType.TABLE,
+        __tableGroup: {
+            tableBlockId,
+            descendants: allDescendants,
+        },
+    };
 
-    for (const row of token.rows) {
-        for (const cell of row) {
-            const elements = inlineTokensToElements(cell.tokens);
-            cellBlocks.push({
-                block_type: BlockType.TABLE_CELL,
-                text: {
-                    elements: elements.length > 0 ? elements : [{ text_run: { content: "" } }],
-                },
-            });
-        }
-    }
-
-    return [tableBlock, ...cellBlocks];
+    return [marker as LarkBlock];
 }
 
 // --- Inline token processing ---
@@ -272,7 +298,7 @@ function inlineTokensToElements(tokens: Token[]): TextElement[] {
         switch (token.type) {
             case "text": {
                 const t = token as Tokens.Text;
-                elements.push({ text_run: { content: t.text } });
+                elements.push({ text_run: { content: decodeHtmlEntities(t.text) } });
                 break;
             }
             case "strong": {
@@ -321,7 +347,7 @@ function inlineTokensToElements(tokens: Token[]): TextElement[] {
                 const t = token as Tokens.Codespan;
                 elements.push({
                     text_run: {
-                        content: t.text,
+                        content: decodeHtmlEntities(t.text),
                         text_element_style: { inline_code: true },
                     },
                 });
@@ -330,12 +356,19 @@ function inlineTokensToElements(tokens: Token[]): TextElement[] {
             case "link": {
                 const t = token as Tokens.Link;
                 const linkText = t.text || t.href;
-                elements.push({
-                    text_run: {
-                        content: linkText,
-                        text_element_style: { link: { url: t.href } },
-                    },
-                });
+                // Only create hyperlinks for absolute URLs; relative links become plain text
+                if (/^https?:\/\//.test(t.href)) {
+                    elements.push({
+                        text_run: {
+                            content: linkText,
+                            text_element_style: { link: { url: t.href } },
+                        },
+                    });
+                } else {
+                    elements.push({
+                        text_run: { content: linkText },
+                    });
+                }
                 break;
             }
             case "image": {
@@ -355,13 +388,13 @@ function inlineTokensToElements(tokens: Token[]): TextElement[] {
             }
             case "escape": {
                 const t = token as Tokens.Escape;
-                elements.push({ text_run: { content: t.text } });
+                elements.push({ text_run: { content: decodeHtmlEntities(t.text) } });
                 break;
             }
             default:
                 // Fallback: try to extract raw text
                 if ("text" in token && typeof (token as any).text === "string") {
-                    elements.push({ text_run: { content: (token as any).text } });
+                    elements.push({ text_run: { content: decodeHtmlEntities((token as any).text) } });
                 }
                 break;
         }
@@ -371,6 +404,18 @@ function inlineTokensToElements(tokens: Token[]): TextElement[] {
 }
 
 // --- Helpers ---
+
+/** Decode HTML entities back to raw characters */
+function decodeHtmlEntities(text: string): string {
+    return text
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+}
 
 function makeTextBlock(blockType: number, elements: TextElement[]): LarkBlock {
     return {
