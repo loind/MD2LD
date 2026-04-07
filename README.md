@@ -14,6 +14,7 @@ md2ld README.md --app-id cli_xxx --app-secret xxx
 - **Diagram rendering** -- Mermaid, PlantUML, Graphviz code fences are rendered to PNG via Kroki.io and embedded as images
 - **Auto title** -- first H1 becomes the document title
 - **Single binary** -- compiles to one executable via Bun, no runtime needed
+- **MCP server** -- built-in MCP server for Claude Desktop and Claude Code
 - **Claude Code integration** -- ships with a `/md2ld` slash command
 
 ## Install
@@ -71,9 +72,65 @@ Preview the generated Lark blocks without calling any API:
 md2ld doc.md --dry-run | jq .
 ```
 
-## Claude Code
+## MCP Server (Claude Desktop / Claude Code)
 
-Copy the slash command into any repo:
+md2ld ships with a built-in MCP server (`dist/md2ld-mcp`). This lets Claude call md2ld as a tool directly.
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "md2ld": {
+      "command": "/usr/local/bin/md2ld-mcp",
+      "env": {
+        "LARK_APP_ID": "cli_xxx",
+        "LARK_APP_SECRET": "xxx",
+        "LARK_FOLDER": "fldXXX"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "md2ld": {
+      "command": "/usr/local/bin/md2ld-mcp",
+      "env": {
+        "LARK_APP_ID": "cli_xxx",
+        "LARK_APP_SECRET": "xxx",
+        "LARK_FOLDER": "fldXXX"
+      }
+    }
+  }
+}
+```
+
+After configuring, Claude can use two tools:
+
+| Tool | Description |
+|---|---|
+| `md2ld` | Push a file or raw Markdown to Lark Docs, returns the doc URL |
+| `md2ld_preview` | Dry run -- returns the Lark Block JSON without creating a doc |
+
+### Install MCP binary
+
+```bash
+bun run build                          # builds both dist/md2ld and dist/md2ld-mcp
+sudo cp dist/md2ld-mcp /usr/local/bin/
+```
+
+### Slash Command (alternative)
+
+If you prefer slash commands over MCP, copy into any repo:
 
 ```bash
 mkdir -p .claude/commands
@@ -95,6 +152,7 @@ bun build src/index.ts --compile --target bun-linux-x64    --outfile dist/md2ld-
 ```
 src/
   index.ts                 CLI entry point
+  mcp-server.ts            MCP server (JSON-RPC over stdio)
   converter/
     md-to-blocks.ts        Markdown -> Lark Block JSON
     types.ts               Block types, language map

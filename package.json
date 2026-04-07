@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "test": "bun test",
-    "build": "bun build src/index.ts --compile --outfile dist/md2ld"
+    "build": "bun build src/index.ts --compile --outfile dist/md2ld && bun build src/mcp-server.ts --compile --outfile dist/md2ld-mcp"
   },
   "dependencies": {
     "marked": "^12.0.0",
