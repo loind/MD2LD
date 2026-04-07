@@ -4,15 +4,16 @@
  *
  * Exposes md2ld as a tool over JSON-RPC stdio, so Claude Desktop
  * and Claude Code can call it directly.
+ *
+ * Security: credentials are read ONLY from env vars (never from tool params).
+ * File access is restricted to allowed roots via MD2LD_ALLOWED_ROOTS env var.
  */
-import { readFileSync, existsSync, writeFileSync } from "fs";
-import { resolve, dirname, join } from "path";
-import { tmpdir } from "os";
+import { readFileSync, existsSync } from "fs";
+import { resolve, join } from "path";
 import { mdToBlocks } from "./converter/md-to-blocks";
 import { createDocument, insertBlocks, getDocUrl } from "./lark/docs";
 import { setCredentials } from "./lark/auth";
-import type { LarkBlock } from "./converter/types";
-import { BlockType } from "./converter/types";
+import { validateFilePath, sanitizeError } from "./security";
 
 // --- MCP Protocol types ---
 
@@ -30,18 +31,29 @@ interface JsonRpcResponse {
     error?: { code: number; message: string; data?: any };
 }
 
+// --- Allowed roots for file access ---
+
+function getAllowedRoots(): string[] {
+    const envRoots = process.env.MD2LD_ALLOWED_ROOTS;
+    if (envRoots) {
+        return envRoots.split(":").map((r) => resolve(r.trim())).filter(Boolean);
+    }
+    // Default: current working directory only
+    return [resolve(process.cwd())];
+}
+
 // --- Tool definitions ---
 
 const TOOLS = [
     {
         name: "md2ld",
-        description: "Convert a Markdown file or raw Markdown text to a Lark Doc. Returns the document URL on success.",
+        description: "Convert a Markdown file or raw Markdown text to a Lark Doc. Returns the document URL on success. Credentials must be set via environment variables (LARK_APP_ID, LARK_APP_SECRET).",
         inputSchema: {
             type: "object" as const,
             properties: {
                 file: {
                     type: "string",
-                    description: "Absolute path to a .md file to push to Lark Docs.",
+                    description: "Path to a .md file to push to Lark Docs. Must be within allowed directories.",
                 },
                 markdown: {
                     type: "string",
@@ -54,14 +66,6 @@ const TOOLS = [
                 folder: {
                     type: "string",
                     description: "Lark folder token to create the doc in.",
-                },
-                app_id: {
-                    type: "string",
-                    description: "Lark App ID (falls back to LARK_APP_ID env var).",
-                },
-                app_secret: {
-                    type: "string",
-                    description: "Lark App Secret (falls back to LARK_APP_SECRET env var).",
                 },
                 dry_run: {
                     type: "boolean",
@@ -78,7 +82,7 @@ const TOOLS = [
             properties: {
                 file: {
                     type: "string",
-                    description: "Absolute path to a .md file.",
+                    description: "Path to a .md file. Must be within allowed directories.",
                 },
                 markdown: {
                     type: "string",
@@ -114,18 +118,27 @@ function loadEnv(): void {
     }
 }
 
+// --- Safe file reader ---
+
+function readMarkdownFile(file: string): string {
+    const allowedRoots = getAllowedRoots();
+    const absPath = validateFilePath(file, allowedRoots);
+
+    if (!existsSync(absPath)) {
+        throw new Error("File not found.");
+    }
+
+    return readFileSync(absPath, "utf-8");
+}
+
 // --- Tool handlers ---
 
 async function handleMd2ld(params: Record<string, any>): Promise<string> {
-    const { file, markdown, title: overrideTitle, folder, app_id, app_secret, dry_run } = params;
+    const { file, markdown, title: overrideTitle, folder, dry_run } = params;
 
     let md: string;
     if (file) {
-        const absPath = resolve(file);
-        if (!existsSync(absPath)) {
-            throw new Error(`File not found: ${absPath}`);
-        }
-        md = readFileSync(absPath, "utf-8");
+        md = readMarkdownFile(file);
     } else if (markdown) {
         md = markdown;
     } else {
@@ -139,13 +152,11 @@ async function handleMd2ld(params: Record<string, any>): Promise<string> {
         return JSON.stringify({ title, blocks }, null, 2);
     }
 
-    // Resolve credentials
-    const appId = app_id || process.env.LARK_APP_ID;
-    const appSecret = app_secret || process.env.LARK_APP_SECRET;
+    // Credentials from env only (never from tool params)
+    const appId = process.env.LARK_APP_ID;
+    const appSecret = process.env.LARK_APP_SECRET;
     if (!appId || !appSecret) {
-        throw new Error(
-            "Lark credentials required. Provide app_id/app_secret params, or set LARK_APP_ID/LARK_APP_SECRET env vars."
-        );
+        throw new Error("Lark credentials not configured. Set LARK_APP_ID and LARK_APP_SECRET environment variables.");
     }
     setCredentials(appId, appSecret);
 
@@ -162,11 +173,7 @@ async function handlePreview(params: Record<string, any>): Promise<string> {
 
     let md: string;
     if (file) {
-        const absPath = resolve(file);
-        if (!existsSync(absPath)) {
-            throw new Error(`File not found: ${absPath}`);
-        }
-        md = readFileSync(absPath, "utf-8");
+        md = readMarkdownFile(file);
     } else if (markdown) {
         md = markdown;
     } else {
@@ -197,7 +204,6 @@ async function dispatch(req: JsonRpcRequest): Promise<JsonRpcResponse> {
             });
 
         case "notifications/initialized":
-            // No response needed for notifications
             return null as any;
 
         case "tools/list":
@@ -219,9 +225,10 @@ async function dispatch(req: JsonRpcRequest): Promise<JsonRpcResponse> {
                 return makeResult(req.id, {
                     content: [{ type: "text", text }],
                 });
-            } catch (err: any) {
+            } catch (err: unknown) {
+                // #7: Sanitize errors — never leak internal paths to MCP callers
                 return makeResult(req.id, {
-                    content: [{ type: "text", text: `Error: ${err.message}` }],
+                    content: [{ type: "text", text: `Error: ${sanitizeError(err)}` }],
                     isError: true,
                 });
             }
@@ -242,6 +249,13 @@ function send(msg: JsonRpcResponse): void {
 async function main(): Promise<void> {
     loadEnv();
 
+    // #6: Set credentials once at startup from env (immutable for session lifetime)
+    const appId = process.env.LARK_APP_ID;
+    const appSecret = process.env.LARK_APP_SECRET;
+    if (appId && appSecret) {
+        setCredentials(appId, appSecret);
+    }
+
     let buffer = "";
 
     process.stdin.setEncoding("utf-8");
@@ -249,7 +263,6 @@ async function main(): Promise<void> {
         buffer += chunk;
 
         while (true) {
-            // Parse header
             const headerEnd = buffer.indexOf("\r\n\r\n");
             if (headerEnd === -1) break;
 
@@ -264,7 +277,7 @@ async function main(): Promise<void> {
             const bodyStart = headerEnd + 4;
             const bodyEnd = bodyStart + contentLength;
 
-            if (buffer.length < bodyEnd) break; // Wait for more data
+            if (buffer.length < bodyEnd) break;
 
             const body = buffer.slice(bodyStart, bodyEnd);
             buffer = buffer.slice(bodyEnd);

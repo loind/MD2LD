@@ -4,15 +4,26 @@ let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 let configuredAppId: string | null = null;
 let configuredAppSecret: string | null = null;
+let credentialsLocked = false;
 
 /**
- * Set Lark app credentials explicitly (from CLI args).
- * Takes priority over environment variables.
+ * Set Lark app credentials explicitly.
+ *
+ * Once set, credentials are locked for the process lifetime to prevent
+ * credential cross-contamination in concurrent scenarios. Subsequent
+ * calls with different credentials will throw.
  */
 export function setCredentials(appId: string, appSecret: string): void {
+    if (credentialsLocked) {
+        // Allow re-setting with identical values (idempotent)
+        if (configuredAppId === appId && configuredAppSecret === appSecret) {
+            return;
+        }
+        throw new Error("Credentials already configured. Restart the process to use different credentials.");
+    }
     configuredAppId = appId;
     configuredAppSecret = appSecret;
-    // Invalidate cached token when credentials change
+    credentialsLocked = true;
     cachedToken = null;
     tokenExpiresAt = 0;
 }
@@ -65,8 +76,11 @@ export async function getToken(): Promise<string> {
     return cachedToken;
 }
 
-/** Clear cached token (useful for testing or forced refresh). */
+/** Clear cached token and unlock credentials (for testing only). */
 export function clearTokenCache(): void {
     cachedToken = null;
     tokenExpiresAt = 0;
+    configuredAppId = null;
+    configuredAppSecret = null;
+    credentialsLocked = false;
 }

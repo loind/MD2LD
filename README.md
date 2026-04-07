@@ -36,8 +36,9 @@ sudo cp dist/md2ld /usr/local/bin/
 ## Usage
 
 ```bash
-# Flags
-md2ld doc.md --app-id cli_xxx --app-secret xxx --folder fldXXX
+# Flags (secret read from file, not CLI arg — safe from `ps`)
+echo "xxx" > ~/.lark-secret
+md2ld doc.md --app-id cli_xxx --app-secret-file ~/.lark-secret --folder fldXXX
 
 # Environment variables
 export LARK_APP_ID=cli_xxx
@@ -50,14 +51,14 @@ echo "LARK_APP_SECRET=xxx" >> ~/.md2ld.env
 md2ld doc.md
 ```
 
-Credential priority: `--app-id`/`--app-secret` flags > env vars > config files.
+Credential priority: `--app-id`/`--app-secret-file` flags > env vars > config files.
 
 ### Options
 
 | Flag | Description |
 |---|---|
 | `--app-id <id>` | Lark app ID |
-| `--app-secret <secret>` | Lark app secret |
+| `--app-secret-file <path>` | File containing Lark app secret |
 | `--folder <token>` | Target folder (or `LARK_FOLDER` env) |
 | `--title <string>` | Override doc title (default: first H1) |
 | `--append <doc-id>` | Append to existing doc |
@@ -88,7 +89,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
-        "LARK_FOLDER": "fldXXX"
+        "LARK_FOLDER": "fldXXX",
+        "MD2LD_ALLOWED_ROOTS": "/Users/me/projects:/Users/me/docs"
       }
     }
   }
@@ -107,12 +109,23 @@ Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
-        "LARK_FOLDER": "fldXXX"
+        "LARK_FOLDER": "fldXXX",
+        "MD2LD_ALLOWED_ROOTS": "/Users/me/projects:/Users/me/docs"
       }
     }
   }
 }
 ```
+
+### Security
+
+| Protection | Detail |
+|---|---|
+| File access | MCP server only reads `.md` files within `MD2LD_ALLOWED_ROOTS` (default: cwd) |
+| Credentials | Only from env vars — never accepted as tool params, never in conversation history |
+| SSRF | Image URLs validated: HTTPS/HTTP only, private/internal IPs blocked |
+| Path traversal | Image paths validated to stay within the markdown file's directory |
+| Error messages | Sanitized — no internal file paths leaked to MCP callers |
 
 After configuring, Claude can use two tools:
 

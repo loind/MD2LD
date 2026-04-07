@@ -7,6 +7,7 @@ import { detectDiagramType, renderAndUploadDiagram } from "./converter/diagrams"
 import { uploadImageFromUrl, uploadImageFromFile } from "./converter/image-upload";
 import { createDocument, insertBlocks, getDocUrl } from "./lark/docs";
 import { setCredentials } from "./lark/auth";
+import { validateImagePath } from "./security";
 import type { LarkBlock } from "./converter/types";
 import { BlockType } from "./converter/types";
 
@@ -42,9 +43,9 @@ Usage:
   md2ld <file.md> [options]
 
 Options:
-  --app-id <id>        Lark app ID (or env LARK_APP_ID)
-  --app-secret <sec>   Lark app secret (or env LARK_APP_SECRET)
-  --folder <token>     Lark folder token (or env LARK_FOLDER)
+  --app-id <id>              Lark app ID (or env LARK_APP_ID)
+  --app-secret-file <path>   File containing Lark app secret (or env LARK_APP_SECRET)
+  --folder <token>           Lark folder token (or env LARK_FOLDER)
   --title <string>     Override document title (default: first H1)
   --no-diagrams        Keep diagrams as code blocks, don't render
   --append <doc-id>    Append to existing doc instead of creating new
@@ -77,8 +78,8 @@ async function processImages(
                 if (src.startsWith("http://") || src.startsWith("https://")) {
                     fileToken = await uploadImageFromUrl(src);
                 } else {
-                    // Resolve relative path against the markdown file's directory
-                    const absPath = resolve(mdDir, src);
+                    // Resolve and validate: must stay within the markdown file's directory
+                    const absPath = validateImagePath(src, mdDir);
                     fileToken = await uploadImageFromFile(absPath);
                 }
                 processed.push({
@@ -159,7 +160,7 @@ async function main(): Promise<void> {
     loadEnv();
 
     const args = minimist(process.argv.slice(2), {
-        string: ["folder", "title", "append", "app-id", "app-secret"],
+        string: ["folder", "title", "append", "app-id", "app-secret-file"],
         boolean: ["dry-run", "no-diagrams", "help"],
         alias: { h: "help" },
     });
@@ -187,11 +188,21 @@ async function main(): Promise<void> {
 
     // Resolve credentials: CLI args > env vars (already loaded from .env files)
     const appId = args["app-id"] || process.env.LARK_APP_ID;
-    const appSecret = args["app-secret"] || process.env.LARK_APP_SECRET;
+    let appSecret = process.env.LARK_APP_SECRET;
+
+    // Read secret from file if --app-secret-file is provided (avoids ps exposure)
+    const secretFile = args["app-secret-file"];
+    if (secretFile) {
+        if (!existsSync(secretFile)) {
+            console.error(`Error: Secret file not found: ${secretFile}`);
+            process.exit(1);
+        }
+        appSecret = readFileSync(secretFile, "utf-8").trim();
+    }
 
     if (!appId || !appSecret) {
         console.error("Error: Lark credentials required.");
-        console.error("Pass --app-id and --app-secret, or set LARK_APP_ID/LARK_APP_SECRET.");
+        console.error("Pass --app-id and --app-secret-file, or set LARK_APP_ID/LARK_APP_SECRET.");
         process.exit(1);
     }
 
