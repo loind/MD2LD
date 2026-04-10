@@ -32,25 +32,47 @@ sudo cp dist/md2ld /usr/local/bin/
 ## Usage
 
 ```bash
-# Pass credentials as flags
-md2ld README.md --app-id cli_xxx --app-secret xxx --folder fldXXX
+# --- Option A: Tenant token (app credentials) ---
+md2ld README.md --app-id cli_xxx --app-secret-file ~/.lark-secret --folder fldXXX
 
-# Or set env vars (add to ~/.bashrc or ~/.zshrc)
+# Or set env vars
 export LARK_APP_ID=cli_xxx
 export LARK_APP_SECRET=xxx
-export LARK_FOLDER=fldXXX
 md2ld README.md
 
-# Or use config file
-cat > ~/.md2ld.env << 'EOF'
-LARK_APP_ID=cli_xxx
-LARK_APP_SECRET=xxx
-LARK_FOLDER=fldXXX
-EOF
+# --- Option B: User token (OAuth — broader scopes) ---
+md2ld README.md --user-token-file ~/.lark_tokens.json
+
+# Or via env var
+export LARK_USER_TOKEN_FILE=~/.lark_tokens.json
 md2ld README.md
 ```
 
+User token takes priority when both are configured.
+
 ## Claude Code Integration
+
+### MCP Server (recommended)
+
+Add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "md2ld": {
+      "command": "/usr/local/bin/md2ld-mcp",
+      "env": {
+        "LARK_APP_ID": "cli_xxx",
+        "LARK_APP_SECRET": "xxx",
+        "LARK_USER_TOKEN_FILE": "/path/to/.lark_tokens.json",
+        "MD2LD_ALLOWED_ROOTS": "/Users/me"
+      }
+    }
+  }
+}
+```
+
+### Slash Command (alternative)
 
 Copy the slash command to any repo where you want to use it:
 

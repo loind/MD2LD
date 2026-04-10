@@ -6,7 +6,7 @@ import { mdToBlocks } from "./converter/md-to-blocks";
 import { detectDiagramType, renderAndUploadDiagram } from "./converter/diagrams";
 import { uploadImageFromUrl, uploadImageFromFile } from "./converter/image-upload";
 import { createDocument, insertBlocks, getDocUrl } from "./lark/docs";
-import { setCredentials } from "./lark/auth";
+import { setCredentials, setUserTokenFile, getTokenType } from "./lark/auth";
 import { validateImagePath } from "./security";
 import type { LarkBlock } from "./converter/types";
 import { BlockType } from "./converter/types";
@@ -45,6 +45,7 @@ Usage:
 Options:
   --app-id <id>              Lark app ID (or env LARK_APP_ID)
   --app-secret-file <path>   File containing Lark app secret (or env LARK_APP_SECRET)
+  --user-token-file <path>   JSON file with user_access_token (or env LARK_USER_TOKEN_FILE)
   --folder <token>           Lark folder token (or env LARK_FOLDER)
   --title <string>     Override document title (default: first H1)
   --no-diagrams        Keep diagrams as code blocks, don't render
@@ -52,10 +53,16 @@ Options:
   --dry-run            Print JSON blocks to stdout, don't call API
   -h, --help           Show this help
 
+Authentication:
+  User token (--user-token-file) takes priority over tenant token.
+  User tokens have broader scopes (docx:document:create, drive:file:upload).
+  Use lark-token-renew to obtain user tokens via OAuth.
+
 Environment (fallback when flags not provided):
-  LARK_APP_ID          Lark app ID
-  LARK_APP_SECRET      Lark app secret
-  LARK_FOLDER          Default folder token
+  LARK_APP_ID              Lark app ID
+  LARK_APP_SECRET          Lark app secret
+  LARK_USER_TOKEN_FILE     Path to user token JSON file
+  LARK_FOLDER              Default folder token
 
 Config files (loaded automatically):
   ~/.md2ld.env
@@ -160,7 +167,7 @@ async function main(): Promise<void> {
     loadEnv();
 
     const args = minimist(process.argv.slice(2), {
-        string: ["folder", "title", "append", "app-id", "app-secret-file"],
+        string: ["folder", "title", "append", "app-id", "app-secret-file", "user-token-file"],
         boolean: ["dry-run", "no-diagrams", "help"],
         alias: { h: "help" },
     });
@@ -186,7 +193,10 @@ async function main(): Promise<void> {
         process.exit(0);
     }
 
-    // Resolve credentials: CLI args > env vars (already loaded from .env files)
+    // Resolve user token file: CLI flag > env var
+    const userTokenFilePath = args["user-token-file"] || process.env.LARK_USER_TOKEN_FILE;
+
+    // Resolve app credentials: CLI args > env vars (already loaded from .env files)
     const appId = args["app-id"] || process.env.LARK_APP_ID;
     let appSecret = process.env.LARK_APP_SECRET;
 
@@ -200,17 +210,28 @@ async function main(): Promise<void> {
         appSecret = readFileSync(secretFile, "utf-8").trim();
     }
 
-    if (!appId || !appSecret) {
-        console.error("Error: Lark credentials required.");
-        console.error("Pass --app-id and --app-secret-file, or set LARK_APP_ID/LARK_APP_SECRET.");
-        process.exit(1);
+    // Set app credentials if available (needed for token refresh even with user token)
+    if (appId && appSecret) {
+        setCredentials(appId, appSecret);
     }
 
-    setCredentials(appId, appSecret);
+    // Set user token if available (takes priority over tenant token)
+    if (userTokenFilePath) {
+        if (!existsSync(userTokenFilePath)) {
+            console.error(`Error: User token file not found: ${userTokenFilePath}`);
+            process.exit(1);
+        }
+        setUserTokenFile(userTokenFilePath);
+    } else if (!appId || !appSecret) {
+        console.error("Error: Lark credentials required.");
+        console.error("Pass --user-token-file, or --app-id and --app-secret-file, or set env vars.");
+        process.exit(1);
+    }
 
     console.log(`Converting: ${filePath}`);
     console.log(`Title: ${title}`);
     console.log(`Blocks: ${blocks.length}`);
+    console.log(`Auth: ${getTokenType()}_access_token`);
 
     // Process images
     let processedBlocks = await processImages(blocks, filePath);

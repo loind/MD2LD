@@ -8,12 +8,23 @@
  * Security: credentials are read ONLY from env vars (never from tool params).
  * File access is restricted to allowed roots via MD2LD_ALLOWED_ROOTS env var.
  */
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, appendFileSync } from "fs";
 import { resolve, join } from "path";
 import { mdToBlocks } from "./converter/md-to-blocks";
 import { createDocument, insertBlocks, getDocUrl } from "./lark/docs";
-import { setCredentials } from "./lark/auth";
+import { setCredentials, setUserTokenFile, getTokenType } from "./lark/auth";
 import { validateFilePath, sanitizeError } from "./security";
+
+// --- Debug logging ---
+const LOG_FILE = "/tmp/md2ld-mcp-protocol.log";
+
+function debugLog(direction: string, data: any): void {
+    try {
+        const ts = new Date().toISOString();
+        const msg = typeof data === "string" ? data : JSON.stringify(data);
+        appendFileSync(LOG_FILE, `[${ts}] ${direction}: ${msg}\n`);
+    } catch {}
+}
 
 // --- MCP Protocol types ---
 
@@ -152,20 +163,22 @@ async function handleMd2ld(params: Record<string, any>): Promise<string> {
         return JSON.stringify({ title, blocks }, null, 2);
     }
 
-    // Credentials from env only (never from tool params)
-    const appId = process.env.LARK_APP_ID;
-    const appSecret = process.env.LARK_APP_SECRET;
-    if (!appId || !appSecret) {
-        throw new Error("Lark credentials not configured. Set LARK_APP_ID and LARK_APP_SECRET environment variables.");
+    // Credentials: user token (preferred) or tenant token from env
+    if (getTokenType() === "tenant") {
+        const appId = process.env.LARK_APP_ID;
+        const appSecret = process.env.LARK_APP_SECRET;
+        if (!appId || !appSecret) {
+            throw new Error("No auth configured. Set LARK_USER_TOKEN_FILE or LARK_APP_ID + LARK_APP_SECRET.");
+        }
+        setCredentials(appId, appSecret);
     }
-    setCredentials(appId, appSecret);
 
     const folderToken = folder || process.env.LARK_FOLDER;
     const documentId = await createDocument(title, folderToken);
     await insertBlocks(documentId, blocks);
 
     const url = getDocUrl(documentId);
-    return `Created: ${url}`;
+    return `Created (${getTokenType()} token): ${url}`;
 }
 
 async function handlePreview(params: Record<string, any>): Promise<string> {
@@ -196,18 +209,31 @@ function makeError(id: number | string | null, code: number, message: string): J
 
 async function dispatch(req: JsonRpcRequest): Promise<JsonRpcResponse> {
     switch (req.method) {
-        case "initialize":
+        case "initialize": {
+            // Echo back the client's protocol version for compatibility
+            const clientVersion = req.params?.protocolVersion || "2024-11-05";
             return makeResult(req.id, {
-                protocolVersion: "2024-11-05",
+                protocolVersion: clientVersion,
                 capabilities: { tools: {} },
                 serverInfo: { name: "md2ld", version: "1.0.0" },
             });
+        }
 
         case "notifications/initialized":
+        case "notifications/cancelled":
             return null as any;
+
+        case "ping":
+            return makeResult(req.id, {});
 
         case "tools/list":
             return makeResult(req.id, { tools: TOOLS });
+
+        case "resources/list":
+            return makeResult(req.id, { resources: [] });
+
+        case "prompts/list":
+            return makeResult(req.id, { prompts: [] });
 
         case "tools/call": {
             const toolName = req.params?.name;
@@ -235,18 +261,30 @@ async function dispatch(req: JsonRpcRequest): Promise<JsonRpcResponse> {
         }
 
         default:
-            return makeError(req.id, -32601, `Method not found: ${req.method}`);
+            // Return empty result for unknown methods to avoid breaking MCP clients
+            if (req.method.startsWith("notifications/")) {
+                return null as any;
+            }
+            return makeResult(req.id, {});
     }
 }
 
 // --- Stdio transport ---
 
+let useFramedTransport = false; // auto-detect from first request
+
 function send(msg: JsonRpcResponse): void {
     const json = JSON.stringify(msg);
-    process.stdout.write(`Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`);
+    if (useFramedTransport) {
+        process.stdout.write(`Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`);
+    } else {
+        process.stdout.write(json + "\n");
+    }
 }
 
 async function main(): Promise<void> {
+    debugLog("STARTUP", `PID=${process.pid} argv=${JSON.stringify(process.argv)}`);
+    debugLog("STARTUP", `env: LARK_APP_ID=${process.env.LARK_APP_ID?.slice(0,10)}... USER_TOKEN=${process.env.LARK_USER_TOKEN_FILE || "(none)"}`);
     loadEnv();
 
     // #6: Set credentials once at startup from env (immutable for session lifetime)
@@ -256,43 +294,120 @@ async function main(): Promise<void> {
         setCredentials(appId, appSecret);
     }
 
+    // User token file takes priority over tenant token when configured
+    const userTokenFilePath = process.env.LARK_USER_TOKEN_FILE;
+    if (userTokenFilePath) {
+        try {
+            setUserTokenFile(userTokenFilePath);
+        } catch {
+            // Non-fatal: will fall back to tenant token
+        }
+    }
+
     let buffer = "";
+
+    async function processMessage(body: string): Promise<void> {
+        try {
+            const req = JSON.parse(body) as JsonRpcRequest;
+            debugLog("REQ", `method=${req.method} id=${req.id}`);
+            const res = await dispatch(req);
+            if (res) {
+                debugLog("RES", `id=${res.id} has_error=${!!res.error}`);
+                send(res);
+            } else {
+                debugLog("RES", "null (notification)");
+            }
+        } catch (e: any) {
+            debugLog("ERR", `Parse error: ${e.message}`);
+            send(makeError(null, -32700, "Parse error"));
+        }
+    }
+
+    function tryParseFramed(): boolean {
+        // Try Content-Length framed format
+        const headerEnd = buffer.indexOf("\r\n\r\n");
+        if (headerEnd === -1) return false;
+
+        const header = buffer.slice(0, headerEnd);
+        const match = header.match(/Content-Length:\s*(\d+)/i);
+        if (!match) return false;
+
+        const contentLength = parseInt(match[1], 10);
+        const bodyStart = headerEnd + 4;
+        const bodyEnd = bodyStart + contentLength;
+
+        if (buffer.length < bodyEnd) return false;
+
+        const body = buffer.slice(bodyStart, bodyEnd);
+        buffer = buffer.slice(bodyEnd);
+        processMessage(body);
+        return true;
+    }
+
+    function tryParseNewlineDelimited(): boolean {
+        // Try newline-delimited JSON (each line is a complete JSON message)
+        const newlineIdx = buffer.indexOf("\n");
+        if (newlineIdx === -1) {
+            // No newline yet — check if the entire buffer is a complete JSON object
+            const trimmed = buffer.trim();
+            if (trimmed && trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                try {
+                    JSON.parse(trimmed); // validate
+                    buffer = "";
+                    processMessage(trimmed);
+                    return true;
+                } catch {
+                    return false; // incomplete JSON
+                }
+            }
+            return false;
+        }
+
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+
+        if (line && line.startsWith("{")) {
+            processMessage(line);
+        }
+        return true;
+    }
 
     process.stdin.setEncoding("utf-8");
     process.stdin.on("data", async (chunk: string) => {
+        debugLog("STDIN_RAW", `chunk_len=${chunk.length} chunk=${chunk.slice(0, 300)}`);
         buffer += chunk;
 
-        while (true) {
-            const headerEnd = buffer.indexOf("\r\n\r\n");
-            if (headerEnd === -1) break;
-
-            const header = buffer.slice(0, headerEnd);
-            const match = header.match(/Content-Length:\s*(\d+)/i);
-            if (!match) {
-                buffer = buffer.slice(headerEnd + 4);
-                continue;
-            }
-
-            const contentLength = parseInt(match[1], 10);
-            const bodyStart = headerEnd + 4;
-            const bodyEnd = bodyStart + contentLength;
-
-            if (buffer.length < bodyEnd) break;
-
-            const body = buffer.slice(bodyStart, bodyEnd);
-            buffer = buffer.slice(bodyEnd);
-
-            try {
-                const req = JSON.parse(body) as JsonRpcRequest;
-                const res = await dispatch(req);
-                if (res) send(res);
-            } catch {
-                send(makeError(null, -32700, "Parse error"));
+        while (buffer.length > 0) {
+            // Auto-detect transport from first message
+            if (buffer.trimStart().startsWith("Content-Length")) {
+                useFramedTransport = true;
+                if (!tryParseFramed()) break;
+            } else {
+                // Newline-delimited JSON (Claude Code default)
+                useFramedTransport = false;
+                if (!tryParseNewlineDelimited()) break;
             }
         }
     });
 
-    process.stdin.on("end", () => process.exit(0));
+    process.stdin.on("end", () => {
+        debugLog("STDIN", "end - exiting");
+        process.exit(0);
+    });
+
+    process.stdin.on("error", (err: any) => {
+        debugLog("STDIN_ERR", err.message);
+    });
+
+    process.on("SIGTERM", () => {
+        debugLog("SIGNAL", "SIGTERM");
+        process.exit(0);
+    });
+
+    process.on("SIGINT", () => {
+        debugLog("SIGNAL", "SIGINT");
+        process.exit(0);
+    });
 }
 
 main();

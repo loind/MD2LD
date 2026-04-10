@@ -14,6 +14,7 @@ md2ld README.md --app-id cli_xxx --app-secret xxx
 - **Diagram rendering** -- Mermaid, PlantUML, Graphviz code fences are rendered to PNG via Kroki.io and embedded as images
 - **Auto title** -- first H1 becomes the document title
 - **Single binary** -- compiles to one executable via Bun, no runtime needed
+- **Dual auth** -- supports both tenant_access_token and user_access_token (OAuth), with auto-refresh
 - **MCP server** -- built-in MCP server for Claude Desktop and Claude Code
 - **Claude Code integration** -- ships with a `/md2ld` slash command
 
@@ -33,9 +34,24 @@ sudo cp dist/md2ld /usr/local/bin/
 2. Enable permissions: `docx:document`, `docx:document:create`, `drive:drive`, `drive:file:upload`
 3. Grab **App ID** and **App Secret**
 
+## Authentication
+
+md2ld supports two authentication methods:
+
+| Method | Token type | Scopes | Use case |
+|---|---|---|---|
+| **App credentials** | `tenant_access_token` | Limited to tenant-level scopes | Simple automation, no user context |
+| **User token file** | `user_access_token` | Full user-level scopes (docx, drive, etc.) | When tenant scopes are insufficient |
+
+**Priority**: user token file > tenant token. If both are configured, user token is used.
+
+User tokens are automatically refreshed via the OAuth refresh_token API when app credentials are also provided.
+
 ## Usage
 
 ```bash
+# --- Tenant token (app credentials) ---
+
 # Flags (secret read from file, not CLI arg — safe from `ps`)
 echo "xxx" > ~/.lark-secret
 md2ld doc.md --app-id cli_xxx --app-secret-file ~/.lark-secret --folder fldXXX
@@ -49,9 +65,29 @@ md2ld doc.md
 echo "LARK_APP_ID=cli_xxx" >> ~/.md2ld.env
 echo "LARK_APP_SECRET=xxx" >> ~/.md2ld.env
 md2ld doc.md
+
+# --- User token (OAuth) ---
+
+# User token file (JSON with access_token + refresh_token)
+md2ld doc.md --user-token-file ~/.lark_tokens.json
+
+# Or via env var
+export LARK_USER_TOKEN_FILE=~/.lark_tokens.json
+md2ld doc.md
 ```
 
-Credential priority: `--app-id`/`--app-secret-file` flags > env vars > config files.
+Credential priority: `--user-token-file` > `--app-id`/`--app-secret-file` flags > env vars > config files.
+
+### User Token File Format
+
+```json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "access_token_expires_at": 1775808406.809,
+  "refresh_token_expires_at": 1776406006.809
+}
+```
 
 ### Options
 
@@ -59,6 +95,7 @@ Credential priority: `--app-id`/`--app-secret-file` flags > env vars > config fi
 |---|---|
 | `--app-id <id>` | Lark app ID |
 | `--app-secret-file <path>` | File containing Lark app secret |
+| `--user-token-file <path>` | JSON file with user_access_token (or env `LARK_USER_TOKEN_FILE`) |
 | `--folder <token>` | Target folder (or `LARK_FOLDER` env) |
 | `--title <string>` | Override doc title (default: first H1) |
 | `--append <doc-id>` | Append to existing doc |
@@ -99,7 +136,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ### Claude Code
 
-Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
+Add to `~/.claude.json` (the `mcpServers` key):
 
 ```json
 {
@@ -109,6 +146,7 @@ Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
+        "LARK_USER_TOKEN_FILE": "/path/to/.lark_tokens.json",
         "LARK_FOLDER": "fldXXX",
         "MD2LD_ALLOWED_ROOTS": "/Users/me/projects:/Users/me/docs"
       }
@@ -117,12 +155,15 @@ Add to `.claude/settings.json` (project) or `~/.claude/settings.json` (global):
 }
 ```
 
+> **Note**: MCP servers must be configured in `~/.claude.json`, not `~/.claude/settings.json`.
+
 ### Security
 
 | Protection | Detail |
 |---|---|
 | File access | MCP server only reads `.md` files within `MD2LD_ALLOWED_ROOTS` (default: cwd) |
 | Credentials | Only from env vars — never accepted as tool params, never in conversation history |
+| Auth tokens | User tokens read from file, auto-refreshed, never exposed to MCP callers |
 | SSRF | Image URLs validated: HTTPS/HTTP only, private/internal IPs blocked |
 | Path traversal | Image paths validated to stay within the markdown file's directory |
 | Error messages | Sanitized — no internal file paths leaked to MCP callers |
@@ -172,7 +213,7 @@ src/
     image-upload.ts         Fetch/read image -> upload to Lark
     diagrams.ts            Mermaid/PlantUML -> PNG via Kroki
   lark/
-    auth.ts                Token cache + auto refresh
+    auth.ts                Dual auth (tenant + user token), auto refresh
     docs.ts                Create doc, batch insert blocks
     files.ts               Upload media
 tests/
