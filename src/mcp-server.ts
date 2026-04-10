@@ -15,10 +15,12 @@ import { createDocument, insertBlocks, getDocUrl } from "./lark/docs";
 import { setCredentials, setUserTokenFile, getTokenType } from "./lark/auth";
 import { validateFilePath, sanitizeError } from "./security";
 
-// --- Debug logging ---
+// --- Debug logging (enable with MD2LD_DEBUG=1) ---
+const DEBUG = process.env.MD2LD_DEBUG === "1";
 const LOG_FILE = "/tmp/md2ld-mcp-protocol.log";
 
 function debugLog(direction: string, data: any): void {
+    if (!DEBUG) return;
     try {
         const ts = new Date().toISOString();
         const msg = typeof data === "string" ? data : JSON.stringify(data);

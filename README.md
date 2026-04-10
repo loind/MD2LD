@@ -102,6 +102,17 @@ Credential priority: `--user-token-file` > `--app-id`/`--app-secret-file` flags 
 | `--no-diagrams` | Keep diagrams as code blocks |
 | `--dry-run` | Print Lark Block JSON, skip API calls |
 
+### Environment Variables
+
+| Variable | Description |
+|---|---|
+| `LARK_APP_ID` | Lark app ID |
+| `LARK_APP_SECRET` | Lark app secret |
+| `LARK_USER_TOKEN_FILE` | Path to user token JSON file |
+| `LARK_FOLDER` | Default folder token |
+| `LARK_DOMAIN` | Your Lark domain (e.g., `mycompany.larksuite.com`) for document URLs |
+| `MD2LD_DEBUG` | Set to `1` to enable MCP protocol debug logging to `/tmp/md2ld-mcp-protocol.log` |
+
 ### Dry run
 
 Preview the generated Lark blocks without calling any API:
@@ -174,6 +185,31 @@ After configuring, Claude can use two tools:
 |---|---|
 | `md2ld` | Push a file or raw Markdown to Lark Docs, returns the doc URL |
 | `md2ld_preview` | Dry run -- returns the Lark Block JSON without creating a doc |
+
+### MAIO Multi-Agent Integration
+
+Khi dùng md2ld với MAIO (Multi-Agent Intelligence Orchestrator), mỗi agent có token riêng tại `~/.maio/agents/{agent_id}/.lark_tokens.json`.
+
+**Config `~/.claude.json` cho agent cụ thể:**
+
+```json
+{
+  "md2ld": {
+    "command": "/usr/local/bin/md2ld-mcp",
+    "env": {
+      "LARK_APP_ID": "cli_xxx",
+      "LARK_APP_SECRET": "xxx",
+      "LARK_USER_TOKEN_FILE": "~/.maio/agents/agent_prd/.lark_tokens.json"
+    }
+  }
+}
+```
+
+**TODO: Tính năng cần phát triển cho MAIO:**
+
+- [ ] Nhận `MAIO_AGENT_ID` từ env → tự resolve token path: `~/.maio/agents/{agent_id}/.lark_tokens.json`
+- [ ] Fallback: nếu không có `MAIO_AGENT_ID` → dùng `LARK_USER_TOKEN_FILE` như cũ
+- [ ] Auto-discover: scan `~/.maio/agents/*/` tìm agent có token hợp lệ khi không specify
 
 ### Install MCP binary
 

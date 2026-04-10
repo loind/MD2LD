@@ -250,7 +250,14 @@ async function insertBatch(
 
 /**
  * Get the URL for a Lark document.
+ *
+ * Uses LARK_DOMAIN env var (e.g., "mycompany.larksuite.com").
+ * Falls back to document ID only if domain is not configured.
  */
 export function getDocUrl(documentId: string): string {
-    return `https://xxx.larksuite.com/docx/${documentId}`;
+    const domain = process.env.LARK_DOMAIN;
+    if (domain) {
+        return `https://${domain}/docx/${documentId}`;
+    }
+    return `docx/${documentId} (set LARK_DOMAIN env to get full URL)`;
 }
