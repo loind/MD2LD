@@ -10,14 +10,19 @@ cd MD2LD
 # 2. Install Bun (if not installed)
 curl -fsSL https://bun.sh/install | bash
 
-# 3. Build binary
+# 3. Build binaries
 bun install
 bun run build
-# -> dist/md2ld
+# -> dist/md2ld (CLI) and dist/md2ld-mcp (MCP server)
 
-# 4. Copy to PATH
-sudo cp dist/md2ld /usr/local/bin/
+# 4. Run directly from dist/ (recommended) or copy to PATH
+./dist/md2ld doc.md
+# Or: sudo cp dist/md2ld dist/md2ld-mcp /usr/local/bin/
 ```
+
+> **macOS note**: Bun-compiled binaries may be blocked by Gatekeeper when copied to
+> `~/.local/bin/` or other non-standard paths (exit code 137 / SIGKILL).
+> Run from `dist/` directly or use `/usr/local/bin/` to avoid this.
 
 ## Lark App Setup (one-time)
 
@@ -60,17 +65,33 @@ Add to `~/.claude.json`:
 {
   "mcpServers": {
     "md2ld": {
-      "command": "/usr/local/bin/md2ld-mcp",
+      "command": "/path/to/MD2LD/dist/md2ld-mcp",
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
         "LARK_USER_TOKEN_FILE": "/path/to/.lark_tokens.json",
+        "LARK_FOLDER": "fldXXX",
+        "LARK_DOMAIN": "mycompany.larksuite.com",
         "MD2LD_ALLOWED_ROOTS": "/Users/me"
       }
     }
   }
 }
 ```
+
+**Environment variables:**
+
+| Variable | Required | Description |
+|---|---|---|
+| `LARK_APP_ID` | Yes* | Lark app ID (also used for token refresh) |
+| `LARK_APP_SECRET` | Yes* | Lark app secret |
+| `LARK_USER_TOKEN_FILE` | No | Path to user token JSON (takes priority over tenant token) |
+| `LARK_FOLDER` | No | Default folder token for new documents |
+| `LARK_DOMAIN` | No | Your Lark domain for document URLs (e.g., `mycompany.larksuite.com`) |
+| `MD2LD_ALLOWED_ROOTS` | No | Colon-separated dirs MCP can read from (default: cwd) |
+| `MD2LD_DEBUG` | No | Set to `1` for protocol debug logging to `/tmp/md2ld-mcp-protocol.log` |
+
+*Required if `LARK_USER_TOKEN_FILE` is not set. Recommended even with user token (needed for auto-refresh).
 
 ### Slash Command (alternative)
 

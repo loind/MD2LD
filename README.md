@@ -4,7 +4,7 @@ Markdown to Lark Docs. Single binary, zero config.
 
 ```bash
 md2ld README.md --app-id cli_xxx --app-secret xxx
-# -> Created: https://xxx.larksuite.com/docx/AbCdEf
+# -> Created: docx/AbCdEf (set LARK_DOMAIN for full URL)
 ```
 
 ## Features
@@ -25,7 +25,17 @@ git clone https://github.com/loind/MD2LD.git
 cd MD2LD
 curl -fsSL https://bun.sh/install | bash   # skip if Bun installed
 bun install && bun run build
-sudo cp dist/md2ld /usr/local/bin/
+# -> dist/md2ld (CLI) and dist/md2ld-mcp (MCP server)
+```
+
+Run directly from `dist/` or copy to PATH:
+
+```bash
+# Option A: Run from project directory (recommended — avoids macOS Gatekeeper issues)
+./dist/md2ld doc.md
+
+# Option B: Copy to PATH (may require clearing quarantine on macOS)
+sudo cp dist/md2ld dist/md2ld-mcp /usr/local/bin/
 ```
 
 ## Lark App Setup
@@ -133,7 +143,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "md2ld": {
-      "command": "/usr/local/bin/md2ld-mcp",
+      "command": "/path/to/MD2LD/dist/md2ld-mcp",
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
@@ -153,7 +163,7 @@ Add to `~/.claude.json` (the `mcpServers` key):
 {
   "mcpServers": {
     "md2ld": {
-      "command": "/usr/local/bin/md2ld-mcp",
+      "command": "/path/to/MD2LD/dist/md2ld-mcp",
       "env": {
         "LARK_APP_ID": "cli_xxx",
         "LARK_APP_SECRET": "xxx",
@@ -167,6 +177,8 @@ Add to `~/.claude.json` (the `mcpServers` key):
 ```
 
 > **Note**: MCP servers must be configured in `~/.claude.json`, not `~/.claude/settings.json`.
+> 
+> **macOS**: Use the binary directly from `dist/` to avoid Gatekeeper blocking execution from `~/.local/bin/` or other non-standard paths.
 
 ### Security
 
@@ -195,7 +207,7 @@ Khi dùng md2ld với MAIO (Multi-Agent Intelligence Orchestrator), mỗi agent 
 ```json
 {
   "md2ld": {
-    "command": "/usr/local/bin/md2ld-mcp",
+    "command": "/path/to/MD2LD/dist/md2ld-mcp",
     "env": {
       "LARK_APP_ID": "cli_xxx",
       "LARK_APP_SECRET": "xxx",
@@ -215,6 +227,8 @@ Khi dùng md2ld với MAIO (Multi-Agent Intelligence Orchestrator), mỗi agent 
 
 ```bash
 bun run build                          # builds both dist/md2ld and dist/md2ld-mcp
+# Use dist/md2ld-mcp directly in your MCP config (recommended)
+# Or copy to /usr/local/bin/ if preferred:
 sudo cp dist/md2ld-mcp /usr/local/bin/
 ```
 
